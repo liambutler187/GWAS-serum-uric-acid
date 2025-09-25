@@ -1,0 +1,393 @@
+---
+title: "LAGA Assessment P2"
+author: "Liam Butler"
+date: "2025-03-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+phen <- read.table("LAGA.phe", header = TRUE)
+head(phen)
+nrow(phen)
+```
+
+```{r}
+sum(phen$sex == 1)
+sum(phen$sex == 0)
+```
+404 males and 405 females
+
+```{r}
+system("plink --bfile LAGA  --mind 0.05 --geno 0.05 --hwe 0.0001 --maf 0.01 --make-bed --chr 1-23 --out LAGA_filtered")
+```
+
+```{r}
+head(phen)
+```
+
+
+```{r}
+write.table(
+  phen[c(1, 2, 3)],
+  file = "sex_covar",
+  quote = FALSE,
+  row.names = FALSE,
+  col.names = FALSE
+)
+
+write.table(
+  phen[c(1, 2, 4)],
+  file = "age_covar",
+  quote = FALSE,
+  row.names = FALSE,
+  col.names = FALSE
+)
+
+#these two write these files into my directory
+```
+
+```{r}
+install.packages("data.table")
+library(data.table) 
+bim_data <- fread("LAGA_filtered.bim", header = FALSE)
+head(bim_data)
+unique_chromosomes <- unique(bim_data$V1)
+unique_chromosomes
+```
+23 unique chromosomes
+
+```{r}
+snps_per_chromosome <- table(bim_data$V1)
+print(snps_per_chromosome)
+```
+
+
+```{r}
+system("gcta64 --fastGWA-lr --bfile LAGA --pheno LAGA.phe --mpheno 3 --covar sex_covar --qcovar age_covar --out gcta_LAGA")
+```
+
+```{r}
+results <- read.table("gcta_LAGA.fastGWA", header = TRUE)
+head(results)
+```
+
+```{r}
+library(qqman)
+qqman::qq(results$P, main = "QQ Plot of GWAS P-values")
+```
+
+```{r}
+obs <- -log10(sort(results$P)) #sorts in ascending order
+exp <- -log10(ppoints(nrow(results)))   # ppoints gives sequence of probability points
+qqif <- lm(obs ~ exp)
+summary(qqif)
+```
+
+The plot does show deviation from the expected line from –log10(P) of around 0.5. This could be due to some structure in the population or, possibly, that uric acid level is a polygenic trait. Carry out the regression and obtain a slope of 1.184. Worth exploring to see what might be causing it.
+
+```{r}
+results$chi_stat <- qchisq(results$P, 1, lower.tail = FALSE)
+median(results$chi_stat)
+
+obs_chisq <- qchisq(results$P, lower.tail = FALSE, df = 1)
+lambda <- median(obs_chisq) / qchisq(p = 0.50, df = 1) # /median of the expected distribution
+#Formula for lambda
+lambda
+```
+
+Lambda = 1.231101
+
+Looking for value of about 1
+
+```{r}
+results$chi_stat_lamb <- results$chi_stat / lambda 
+head(results)
+```
+
+```{r}
+results$p_value_back <- pchisq(results$chi_stat_lamb, df = 1, lower.tail = FALSE)
+head(results)
+print(results[results$p_value_back < gwst, ], digits = 3)
+```
+
+
+```{r}
+system("gcta64 --bfile LAGA_filtered --make-grm --out LAGA_GRM")
+```
+
+```{r}
+system("gcta64  --grm LAGA_GRM  --pca  --out LAGA_pca")
+```
+
+```{r}
+grm_eig <- read.table("LAGA_pca.eigenval",col.names = "EigenValues")
+head(grm_eig)
+eigenvectors <- read.table("LAGA_pca.eigenvec", header=FALSE)
+print(eigenvectors)
+```
+
+```{r}
+plot(grm_eig$EigenValues, xlab = "PCA", ylab = "Eigenvalues")
+plot(grm_eig$EigenValues/sum(grm_eig$EigenValues))
+cum_var  <- cumsum(grm_eig$EigenValues/sum(grm_eig$EigenValues))
+plot(cum_var)
+```
+
+```{r}
+plot(cum_var, type = "o", col = "blue", lwd = 2, pch = 16,
+     xlab = "Principal Component", ylab = "Cumulative Variance Explained",
+     main = "Cumulative Variance Explained by Principal Components",
+     cex.main = 1.2, cex.lab = 1.1, cex.axis = 1)
+
+# Add grid lines for better readability
+grid()
+```
+
+
+```{r}
+sum(grm_eig$EigenValues[1:5])/ sum(grm_eig$EigenValues) * 100
+```
+
+First 5 explain only 2.741296%
+
+```{r}
+plot(eigenvectors$V3, eigenvectors$V4)
+```
+
+```{r}
+# Create the plot with customizations
+plot(eigenvectors$V3, eigenvectors$V4, 
+     col = "darkgreen", pch = 19, cex = 1.2,
+     xlab = "Principal Component 1", ylab = "Principal Component 2",
+     main = "Scatter Plot of Principal Components 1 and 2",
+     cex.main = 1.2, cex.lab = 1.1, cex.axis = 1)
+
+# Add grid lines for better readability
+grid()
+```
+
+```{r}
+# Set up a 1x2 plotting area
+par(mfrow = c(1, 2))
+
+# Plot the cumulative variance explained by principal components
+plot(cum_var, type = "o", col = "blue", lwd = 2, pch = 16,
+     xlab = "Principal Component", ylab = "Cumulative Variance Explained",
+     main = "Cumulative Variance Explained by Principal Components",
+     cex.main = 0.65, cex.lab = 1.1, cex.axis = 1)
+grid()
+
+# Plot the scatter plot of Principal Components 3 and 4
+plot(eigenvectors$V3, eigenvectors$V4, 
+     col = "darkgreen", pch = 19, cex = 1.2,
+     xlab = "Principal Component 1", ylab = "Principal Component 2",
+     main = "Scatter Plot of Principal Components 1 and 2",
+     cex.main = 0.7, cex.lab = 1.1, cex.axis = 1)
+grid()
+```
+
+
+```{r}
+source("readGRM.R")
+GRM <- readGRM("LAGA_GRM")
+str(GRM)
+head(GRM$grm)
+offdiag <- GRM$grm[GRM$grm$id1 != GRM$grm$id2, ]
+diag <- GRM$grm[GRM$grm$id1 == GRM$grm$id2,]
+sum(offdiag$grm > 0.25)
+sum(offdiag$grm > 0.5)
+```
+
+```{r}
+relatives <- offdiag[offdiag$grm > 0.025,] 
+hist(relatives$grm)
+hist(offdiag$grm)
+```
+
+It looks as though there are some parent and offspring or full-sib relationships giving the peak around 0.5. There’s also a spread of pairs of individuals with an estimated relationship coefficient of around 0.25 (for example between half-sibs) and a lot with low relationship coefficients. Overall, it looks as if our data contains some related individuals and we should account for this in subsequent analyses. 
+
+```{r}
+results[order(results$P, decreasing = FALSE),][1:10,]
+```
+
+```{r}
+sign <- results$P < 5e-8
+sum(sign)
+```
+
+```{r}
+gwst <- 0.05/nrow(results) 
+gwst
+```
+
+```{r}
+print(results[results$P < gwst, ], digits = 3)
+```
+
+```{r}
+library(qqman)
+manhattan(results, chr = "CHR", bp = "POS", p = "P", snp = "SNP",
+col = c("gray10", "gray60"), chrlabs = NULL, suggestiveline = FALSE,
+genomewideline = -log10(gwst))
+```
+
+26 Chromosomes??
+
+```{r}
+# Load necessary library
+library(data.table)
+
+# Read the phenotype file without headers
+df <- fread("LAGA.phe", header = FALSE)
+
+# Drop the first row
+df <- df[-1, ]
+
+# Save the modified file without headers
+fwrite(df, "LAGA_modified.phe", sep = " ", col.names = FALSE)
+```
+
+
+```{r}
+system("gcta64 --mlma --grm LAGA_GRM --bfile LAGA_filtered --pheno LAGA.phe --mpheno 3 --covar sex_covar --qcovar age_covar --out gctamlma")
+```
+
+```{r}
+results_mlma <- read.table("gctamlma.mlma", header = T)
+results_mlma[order(results$P, decreasing = FALSE),][1:10,]
+```
+
+```{r}
+qq(results_mlma$p)
+```
+
+```{r}
+# Set up a 1x2 plotting area
+par(mfrow = c(1, 2))
+
+# Plot the QQ plot for standard GWAS
+qqman::qq(results$P, main = "QQ Plot of Standard GWAS P-values", cex.main = 0.8)
+
+# Plot the QQ plot for MLMA GWAS
+qqman::qq(results_mlma$p, main = "QQ Plot of MLMA GWAS P-values", cex.main = 0.8)
+```
+
+
+```{r}
+gwst2 <- 0.05/nrow(results_mlma) 
+gwst
+nrow(results_mlma) 
+sign2 <- results_mlma$p < gwst2
+sum(sign2)
+```
+
+```{r}
+obs2 <- -log10(sort(results_mlma$p)) #sorts in ascending order
+exp2 <- -log10(ppoints(nrow(results_mlma)))   # ppoints gives sequence of probability points
+qqif <- lm(obs2 ~ exp2)
+summary(qqif)
+```
+
+No, not evidence of stratification as most lie on the 1 to 1 line. Slope of the regression line = 1. 
+
+```{r}
+head(results_mlma)
+results_mlma$chi_stat <- qchisq(results_mlma$p, 1, lower.tail = FALSE)
+```
+
+```{r}
+results_mlma[results_mlma$p < gwst2, ]
+```
+
+```{r}
+obs_chisq2 <- qchisq(results_mlma$p, lower.tail = FALSE, df = 1)
+median(obs_chisq2)
+lambda <- median(obs_chisq2) / qchisq(p = 0.50, df = 1) 
+lambda
+```
+
+Lambda = 1.002036
+
+Looking for a value of about 1 which. Our result is pretty close.
+
+```{r}
+table(results_mlma$Chr)
+```
+
+```{r}
+manhattan(results_mlma, 
+          chr = "Chr", 
+          bp = "bp", 
+          p = "p", 
+          snp = "SNP",
+          col = c("#0072B2", "#E69F00"),  # Alternating blue & orange
+          chrlabs = paste0("Chr", 1:22), 
+          suggestiveline = FALSE,
+          genomewideline = -log10(gwst2),
+          cex = 0.6,  # Adjust point size
+          cex.axis = 1.2,  # Increase axis font size
+          main = "Manhattan Plot of SNPs associated with Uric acid level",
+          xlab = "Chromosome",
+          ylab = "-log10(p-value)")
+
+# Add the genome-wide significance line separately
+abline(h = -log10(gwst2), col = "red", lty = 2)
+```
+
+
+```{r}
+head(results_mlma)
+results_mlma$variance_explained <- 2 * results_mlma$Freq * (1 - results_mlma$Freq) * results_mlma$b^2
+results_mlma[order(results$P, decreasing = FALSE),][1:10,]
+```
+
+High variance explained but not significant?
+
+```{r}
+system("gcta64 --grm LAGA_GRM --reml --pheno LAGA.phe --mpheno 3 --covar sex_covar --qcovar age_covar --reml-est-fix --out herit", intern = T)
+```
+
+```{r}
+file_contents <- readLines("Herit.hsq")
+cat(file_contents, sep = "\n")
+```
+
+```{r}
+Vp <-   1.023308
+results_mlma_sig <- results_mlma[results_mlma$p < gwst2,] # significant ones
+results_mlma_sig$var <- 2 * results_mlma_sig$Freq * (1 - results_mlma_sig$Freq) * results_mlma_sig$b^2
+results_mlma_sig$herit <- results_mlma_sig$var / Vp
+print(results_mlma_sig, digits = 3)
+```
+
+Very close so believe only 1 causal variant. 
+
+```{r}
+0.03757936 / Vp * 100
+```
+
+ Proportion of total variance: 3.672341%
+ 
+```{r}
+Vp <-   1.023308
+results_sig <- results[results$p_value_back < gwst,] # significant ones
+head(results_sig)
+results_sig$var <- 2 * results_sig$AF1 * (1 - results_sig$AF1) * results_sig$BETA^2
+results_sig$herit <- results_sig$var / Vp
+print(results_sig, digits = 3)
+```
+ 
+```{r}
+0.03736267 / Vp * 100
+```
+ 
+```{r}
+library(knitr)
+purl("Assessment part 2.Rmd", output = "extracted_code2.R")
+```
+ 
+ 
